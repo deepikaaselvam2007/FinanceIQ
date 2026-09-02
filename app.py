@@ -1,6 +1,12 @@
+import os
 import streamlit as st
 import pandas as pd
-from utils.finance import calculate_total_expense, calculate_balance, generate_financial_advice
+from groq import Groq
+
+from utils.finance import (
+    calculate_total_expense,
+    calculate_balance
+)
 
 # Page configuration
 st.set_page_config(
@@ -9,13 +15,61 @@ st.set_page_config(
     layout="wide"
 )
 
-# Title
+# Groq API
+api_key = os.getenv("GROQ_API_KEY")
+
+if not api_key and "GROQ_API_KEY" in st.secrets:
+    api_key = st.secrets["GROQ_API_KEY"]
+
+client = Groq(api_key=api_key) if api_key else None
+
+
+def generate_ai_advice(income, total_expense, data):
+    if client is None:
+        return "Groq API key is not configured."
+
+    prompt = f"""
+You are FinanceIQ, a personal finance educational assistant.
+
+Income: ₹{income:.2f}
+Total expenses: ₹{total_expense:.2f}
+
+Expense data:
+{data.to_string(index=False)}
+
+Give a simple and easy-to-understand financial summary.
+Identify major spending areas and provide 3 practical budgeting suggestions.
+
+Do not provide investment, loan, tax, or trading recommendations.
+Keep the answer educational and concise.
+"""
+
+    response = client.chat.completions.create(
+        model="openai/gpt-oss-20b",
+        messages=[
+            {
+                "role": "system",
+                "content": "You are a helpful personal finance education assistant."
+            },
+            {
+                "role": "user",
+                "content": prompt
+            }
+        ],
+        temperature=0.4,
+        max_tokens=500
+    )
+
+    return response.choices[0].message.content
+
+
+# Header
 st.title("💰 FinanceIQ")
 st.subheader("FinanceIQ — Personal Finance Assistant")
 
 st.write(
-    "AI-powered personal finance assistant for expense analysis "
-    "and budgeting guidance."
+    "Gen AI powered personal finance assistant for "
+    "expense analysis and budgeting guidance."
 )
 
 st.success("100% Free & Open Source")
@@ -29,7 +83,7 @@ with col1:
 
 with col2:
     st.markdown("### 🤖 AI Financial Insights")
-    st.write("Get intelligent insights from your financial data.")
+    st.write("Get intelligent insights using an LLM.")
 
 with col3:
     st.markdown("### 🧠 AI Budget Advisor")
@@ -47,12 +101,12 @@ data_source = st.sidebar.radio(
 
 months = st.sidebar.slider(
     "Months of history",
-    min_value=1,
-    max_value=12,
-    value=6
+    1,
+    12,
+    6
 )
 
-# Sample data
+# Sample Data
 if data_source == "Sample Data":
 
     if st.sidebar.button("Generate Sample Data"):
@@ -76,9 +130,7 @@ if data_source == "Sample Data":
             ]
         }
 
-        df = pd.DataFrame(data)
-
-        st.session_state["finance_data"] = df
+        st.session_state["finance_data"] = pd.DataFrame(data)
 
 # Upload CSV
 else:
@@ -88,9 +140,10 @@ else:
         type=["csv"]
     )
 
-    if uploaded_file is not None:
-        df = pd.read_csv(uploaded_file)
-        st.session_state["finance_data"] = df
+    if uploaded_file:
+        st.session_state["finance_data"] = pd.read_csv(
+            uploaded_file
+        )
 
 
 # Dashboard
@@ -107,56 +160,52 @@ if "finance_data" in st.session_state:
         use_container_width=True
     )
 
-    # Expense calculation
     if "Amount" in df.columns:
 
         total_expense = calculate_total_expense(
             df["Amount"].tolist()
         )
 
-        col1, col2 = st.columns(2)
+        st.metric(
+            "💸 Total Expense",
+            f"₹{total_expense:,.2f}"
+        )
 
-        with col1:
-            st.metric(
-                "💸 Total Expense",
-                f"₹{total_expense:,.2f}"
-            )
+        income = st.number_input(
+            "💰 Monthly Income",
+            min_value=0.0,
+            value=30000.0,
+            step=1000.0
+        )
 
-        with col2:
-            income = st.number_input(
-                "💰 Monthly Income",
-                min_value=0.0,
-                value=30000.0,
-                step=1000.0
-            )
+        balance = calculate_balance(
+            income,
+            total_expense
+        )
 
-            balance = calculate_balance(
-                income,
-                total_expense
-            )
-
-            st.metric(
-                "💵 Remaining Balance",
-                f"₹{balance:,.2f}"
-            )
+        st.metric(
+            "💵 Remaining Balance",
+            f"₹{balance:,.2f}"
+        )
 
         st.divider()
 
-        # AI Budget Advisor
-        st.subheader("🧠 AI Budget Advisor")
+        st.subheader("🤖 AI Financial Insights")
 
-        if st.button("Generate AI Financial Advice"):
+        if st.button("Generate AI Financial Insights"):
 
-            advice = generate_financial_advice(
-                income,
-                total_expense
-            )
+            with st.spinner("FinanceIQ AI is analysing your data..."):
+
+                advice = generate_ai_advice(
+                    income,
+                    total_expense,
+                    df
+                )
 
             st.info(advice)
 
         st.caption(
-            "FinanceIQ provides general educational budgeting guidance "
-            "and is not a substitute for professional financial advice."
+            "FinanceIQ provides general educational budgeting guidance."
         )
 
 else:
